@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 const NETEASE_INIT_URL = "http://optsdk.gameyw.netease.com";
 const G79_DECRYPT_KEY = "c42bf7f39d476db3";
 const REFRESH_INTERVAL_MS = 30 * 60 * 1000;
+const PREVIOUS_SNAPSHOT_RETENTION_MS = 3 * 60 * 1000;
 const DEFAULT_CACHE_FILE = join(process.cwd(), ".cache", "g79-rules.json");
 
 type RuleMap = Record<string, string>;
@@ -23,15 +24,22 @@ type CacheFile = {
 };
 
 export type G79StoreStatus = {
+  snapshotMode: "active" | "previous-fallback" | "unavailable";
   loadedFromCache: boolean;
   hasRules: boolean;
   hash: string | null;
+  compiledAt: number | null;
   sourceUrl: string | null;
-  updatedAt: string | null;
-  lastAttemptAt: string | null;
+  updatedAt: number | null;
+  lastAttemptAt: number | null;
   lastError: string | null;
   refreshIntervalMs: number;
   categoryCount: number;
+  previousSnapshot: {
+    retained: boolean;
+    hash: string | null;
+    expiresAt: number | null;
+  };
 };
 
 type Snapshot = {
@@ -41,8 +49,15 @@ type Snapshot = {
   rules: G79RuleSet;
 };
 
+type RuntimeSnapshot = Snapshot & {
+  compiledAt: string;
+  compiledGroups: Record<string, CompiledRule[]>;
+  summaries: RuleGroupSummary[];
+};
+
 type CompiledRule = {
   id: string;
+  displayId: string;
   source: string;
   regex: RegExp | null;
   error: string | null;
@@ -64,6 +79,7 @@ type MatchRange = {
 export type G79RuleHit = {
   rule: string;
   id: string;
+  displayId: string;
   pattern: string;
   violations: string[];
   ranges: MatchRange[];
@@ -92,10 +108,12 @@ export type G79CheckMode = "all" | "first";
 export class G79RuleStore {
   private readonly cachePath: string;
   private readonly refreshIntervalMs: number;
-  private snapshot: Snapshot | null = null;
-  private compiledGroups: Record<string, CompiledRule[]> = {};
+  private activeSnapshot: RuntimeSnapshot | null = null;
+  private previousSnapshot: RuntimeSnapshot | null = null;
+  private previousSnapshotExpiresAt: string | null = null;
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
-  private refreshPromise: Promise<Snapshot> | null = null;
+  private previousSnapshotCleanupTimer: ReturnType<typeof setTimeout> | null = null;
+  private refreshPromise: Promise<RuntimeSnapshot> | null = null;
   private loadedFromCache = false;
   private lastAttemptAt: string | null = null;
   private lastError: string | null = null;
@@ -108,7 +126,7 @@ export class G79RuleStore {
   async initialize() {
     await this.loadCacheIfPresent();
 
-    if (this.snapshot) {
+    if (this.activeSnapshot) {
       console.log(`Loaded g79 rules from cache: ${this.cachePath}`);
       void this.refresh("startup");
     } else {
@@ -121,25 +139,17 @@ export class G79RuleStore {
   }
 
   getRules() {
-    return this.snapshot?.rules ?? null;
+    return this.getReadableSnapshot()?.rules ?? null;
   }
 
   getAvailableRuleNames() {
-    return Object.keys(this.compiledGroups).sort((left, right) => left.localeCompare(right));
+    return Object.keys(this.getReadableSnapshot()?.compiledGroups ?? {}).sort((left, right) =>
+      left.localeCompare(right),
+    );
   }
 
   getRuleSummaries(): RuleGroupSummary[] {
-    return this.getAvailableRuleNames().map((name) => {
-      const group = this.compiledGroups[name] ?? [];
-      const compiledPatternCount = group.filter((entry) => entry.regex !== null).length;
-
-      return {
-        name,
-        patternCount: group.length,
-        compiledPatternCount,
-        invalidPatternCount: group.length - compiledPatternCount,
-      };
-    });
+    return this.getReadableSnapshot()?.summaries ?? [];
   }
 
   checkText(
@@ -147,12 +157,14 @@ export class G79RuleStore {
     requestedRules: string[],
     options?: { mode?: G79CheckMode },
   ) {
-    if (!this.snapshot) {
+    const runtimeSnapshot = this.getReadableSnapshot();
+
+    if (!runtimeSnapshot) {
       throw new Error("g79 rules are not loaded yet.");
     }
 
     const requested = normalizeRequestedRules(requestedRules);
-    const resolved = this.resolveRuleNames(requested);
+    const resolved = this.resolveRuleNames(runtimeSnapshot, requested);
     const mode = options?.mode ?? "all";
     const stopAtFirstHit = mode === "first";
     const hits: G79RuleHit[] = [];
@@ -164,7 +176,7 @@ export class G79RuleStore {
 
     for (const ruleName of resolved.resolvedRules) {
       checkedGroupCount += 1;
-      const group = this.compiledGroups[ruleName] ?? [];
+      const group = runtimeSnapshot.compiledGroups[ruleName] ?? [];
 
       for (const entry of group) {
         if (!entry.regex) {
@@ -182,6 +194,7 @@ export class G79RuleStore {
         const hit = {
           rule: ruleName,
           id: entry.id,
+          displayId: entry.displayId,
           pattern: entry.source,
           violations: uniqueValues(ranges.map((range) => range.value)),
           ranges,
@@ -234,16 +247,30 @@ export class G79RuleStore {
   }
 
   getStatus(): G79StoreStatus {
+    const runtimeSnapshot = this.getReadableSnapshot();
+    const snapshotMode = this.activeSnapshot
+      ? "active"
+      : runtimeSnapshot
+        ? "previous-fallback"
+        : "unavailable";
+
     return {
+      snapshotMode,
       loadedFromCache: this.loadedFromCache,
-      hasRules: this.snapshot !== null,
-      hash: this.snapshot?.hash ?? null,
-      sourceUrl: this.snapshot?.sourceUrl ?? null,
-      updatedAt: this.snapshot?.updatedAt ?? null,
-      lastAttemptAt: this.lastAttemptAt,
+      hasRules: runtimeSnapshot !== null,
+      hash: runtimeSnapshot?.hash ?? null,
+      compiledAt: toUnixSeconds(runtimeSnapshot?.compiledAt ?? null),
+      sourceUrl: runtimeSnapshot?.sourceUrl ?? null,
+      updatedAt: toUnixSeconds(runtimeSnapshot?.updatedAt ?? null),
+      lastAttemptAt: toUnixSeconds(this.lastAttemptAt),
       lastError: this.lastError,
       refreshIntervalMs: this.refreshIntervalMs,
-      categoryCount: Object.keys(this.snapshot?.rules.regex ?? {}).length,
+      categoryCount: Object.keys(runtimeSnapshot?.rules.regex ?? {}).length,
+      previousSnapshot: {
+        retained: this.previousSnapshot !== null,
+        hash: this.previousSnapshot?.hash ?? null,
+        expiresAt: toUnixSeconds(this.previousSnapshotExpiresAt),
+      },
     };
   }
 
@@ -264,6 +291,11 @@ export class G79RuleStore {
       clearInterval(this.refreshTimer);
       this.refreshTimer = null;
     }
+
+    if (this.previousSnapshotCleanupTimer) {
+      clearTimeout(this.previousSnapshotCleanupTimer);
+      this.previousSnapshotCleanupTimer = null;
+    }
   }
 
   private async loadCacheIfPresent() {
@@ -271,17 +303,17 @@ export class G79RuleStore {
       const raw = await readFile(this.cachePath, "utf8");
       const parsed = JSON.parse(raw) as CacheFile;
 
-      if (!parsed?.rules?.regex || typeof parsed.sourceUrl !== "string") {
+      if (!parsed?.rules?.regex) {
         throw new Error("Cache file format is invalid.");
       }
 
-      this.snapshot = {
+      this.activeSnapshot = this.createRuntimeSnapshot({
         updatedAt: parsed.updatedAt,
         sourceUrl: parsed.sourceUrl,
         hash: parsed.hash,
         rules: parsed.rules,
-      };
-      this.compiledGroups = compileRegexGroups(parsed.rules.regex);
+      });
+      this.clearPreviousSnapshot();
       this.loadedFromCache = true;
       this.lastError = null;
     } catch (error) {
@@ -301,38 +333,39 @@ export class G79RuleStore {
     try {
       const sourceUrl = await resolveG79DownloadUrl();
       const rules = await fetchAndDecryptG79Rules(sourceUrl);
-      const hash = stableHash(rules);
-      const updatedAt = new Date().toISOString();
-
-      this.snapshot = {
-        updatedAt,
+      const nextSnapshot = this.createRuntimeSnapshot({
+        updatedAt: new Date().toISOString(),
         sourceUrl,
-        hash,
+        hash: stableHash(rules),
         rules,
-      };
-      this.compiledGroups = compileRegexGroups(rules.regex);
-      this.loadedFromCache = false;
-      this.lastError = null;
+      });
 
-      await persistCache(this.cachePath, this.snapshot);
+      this.promoteSnapshot(nextSnapshot, { loadedFromCache: false });
+      await persistCache(this.cachePath, nextSnapshot);
 
-      console.log(`[g79] Refreshed rules (${reason}) hash=${hash}`);
-      return this.snapshot;
+      console.log(`[g79] Refreshed rules (${reason}) hash=${nextSnapshot.hash}`);
+      return nextSnapshot;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.lastError = `Failed to refresh g79 rules: ${message}`;
       console.warn(`[g79] ${this.lastError}`);
 
-      if (this.snapshot) {
-        return this.snapshot;
+      if (this.activeSnapshot) {
+        return this.activeSnapshot;
+      }
+
+      if (this.previousSnapshot) {
+        return this.previousSnapshot;
       }
 
       throw error;
     }
   }
 
-  private resolveRuleNames(requestedRules: string[]) {
-    const availableRules = this.getAvailableRuleNames();
+  private resolveRuleNames(runtimeSnapshot: RuntimeSnapshot, requestedRules: string[]) {
+    const availableRules = Object.keys(runtimeSnapshot.compiledGroups).sort((left, right) =>
+      left.localeCompare(right),
+    );
     const ruleNameLookup = new Map(
       availableRules.map((ruleName) => [ruleName.toLowerCase(), ruleName]),
     );
@@ -366,6 +399,73 @@ export class G79RuleStore {
     };
   }
 
+  private getReadableSnapshot() {
+    if (this.activeSnapshot) {
+      return this.activeSnapshot;
+    }
+
+    if (!this.previousSnapshot || !this.previousSnapshotExpiresAt) {
+      return null;
+    }
+
+    if (Date.now() > Date.parse(this.previousSnapshotExpiresAt)) {
+      this.clearPreviousSnapshot();
+      return null;
+    }
+
+    return this.previousSnapshot;
+  }
+
+  private createRuntimeSnapshot(snapshot: Snapshot): RuntimeSnapshot {
+    const compiledGroups = compileRegexGroups(snapshot.rules.regex);
+
+    return {
+      ...snapshot,
+      compiledAt: new Date().toISOString(),
+      compiledGroups,
+      summaries: buildRuleGroupSummaries(compiledGroups),
+    };
+  }
+
+  private promoteSnapshot(nextSnapshot: RuntimeSnapshot, options: { loadedFromCache: boolean }) {
+    const currentSnapshot = this.activeSnapshot;
+
+    this.activeSnapshot = nextSnapshot;
+    this.loadedFromCache = options.loadedFromCache;
+    this.lastError = null;
+
+    if (currentSnapshot) {
+      this.retainPreviousSnapshot(currentSnapshot);
+    }
+  }
+
+  private retainPreviousSnapshot(snapshot: RuntimeSnapshot) {
+    if (this.previousSnapshotCleanupTimer) {
+      clearTimeout(this.previousSnapshotCleanupTimer);
+      this.previousSnapshotCleanupTimer = null;
+    }
+
+    const expiresAt = new Date(Date.now() + PREVIOUS_SNAPSHOT_RETENTION_MS);
+    this.previousSnapshot = snapshot;
+    this.previousSnapshotExpiresAt = expiresAt.toISOString();
+    this.previousSnapshotCleanupTimer = setTimeout(() => {
+      if (this.previousSnapshot === snapshot) {
+        this.clearPreviousSnapshot();
+      }
+    }, PREVIOUS_SNAPSHOT_RETENTION_MS);
+
+    this.previousSnapshotCleanupTimer.unref?.();
+  }
+
+  private clearPreviousSnapshot() {
+    if (this.previousSnapshotCleanupTimer) {
+      clearTimeout(this.previousSnapshotCleanupTimer);
+      this.previousSnapshotCleanupTimer = null;
+    }
+
+    this.previousSnapshot = null;
+    this.previousSnapshotExpiresAt = null;
+  }
 }
 
 async function persistCache(cachePath: string, snapshot: Snapshot) {
@@ -531,23 +631,39 @@ function appendUnique(target: string[], values: string[]) {
 }
 
 function collectMatchRanges(regex: RegExp, text: string) {
-  const flags = regex.flags.includes("g") ? regex.flags : `${regex.flags}g`;
-  const runtimeRegex = new RegExp(regex.source, flags);
   const ranges: MatchRange[] = [];
+  regex.lastIndex = 0;
 
-  for (const match of text.matchAll(runtimeRegex)) {
-    const value = match[0] ?? "";
-    const start = match.index ?? -1;
+  try {
+    while (true) {
+      const match = regex.exec(text);
 
-    if (!value || start < 0) {
-      continue;
+      if (!match) {
+        break;
+      }
+
+      const value = match[0] ?? "";
+      const start = match.index ?? -1;
+
+      if (!value || start < 0) {
+        if (value.length === 0) {
+          regex.lastIndex += 1;
+        }
+        continue;
+      }
+
+      ranges.push({
+        value,
+        start,
+        end: start + value.length,
+      });
+
+      if (value.length === 0) {
+        regex.lastIndex += 1;
+      }
     }
-
-    ranges.push({
-      value,
-      start,
-      end: start + value.length,
-    });
+  } finally {
+    regex.lastIndex = 0;
   }
 
   return ranges;
@@ -596,17 +712,34 @@ function compileRegexGroups(groups: RegexGroups) {
   return Object.fromEntries(
     Object.entries(groups).map(([groupName, patterns]) => [
       groupName,
-      Object.entries(patterns).map(([id, source]) => compileRule(id, source)),
+      Object.entries(patterns).map(([id, source]) => compileRule(groupName, id, source)),
     ]),
   );
 }
 
-function compileRule(id: string, source: string): CompiledRule {
+function buildRuleGroupSummaries(compiledGroups: Record<string, CompiledRule[]>) {
+  return Object.keys(compiledGroups)
+    .sort((left, right) => left.localeCompare(right))
+    .map((name) => {
+      const group = compiledGroups[name] ?? [];
+      const compiledPatternCount = group.filter((entry) => entry.regex !== null).length;
+
+      return {
+        name,
+        patternCount: group.length,
+        compiledPatternCount,
+        invalidPatternCount: group.length - compiledPatternCount,
+      };
+    });
+}
+
+function compileRule(groupName: string, id: string, source: string): CompiledRule {
   try {
     const compiled = createRuntimeRegex(source);
 
     return {
       id,
+      displayId: `${groupName}-${id}`,
       source,
       regex: compiled,
       error: null,
@@ -614,6 +747,7 @@ function compileRule(id: string, source: string): CompiledRule {
   } catch (error) {
     return {
       id,
+      displayId: `${groupName}-${id}`,
       source,
       regex: null,
       error: error instanceof Error ? error.message : String(error),
@@ -623,7 +757,8 @@ function compileRule(id: string, source: string): CompiledRule {
 
 function createRuntimeRegex(source: string) {
   const extracted = extractLeadingFlags(source);
-  return new RegExp(extracted.pattern, extracted.flags);
+  const flags = extracted.flags.includes("g") ? extracted.flags : `${extracted.flags}g`;
+  return new RegExp(extracted.pattern, flags);
 }
 
 function extractLeadingFlags(source: string) {
@@ -674,4 +809,13 @@ function sortValue(value: unknown): unknown {
   }
 
   return value;
+}
+
+function toUnixSeconds(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? null : Math.floor(timestamp / 1000);
 }

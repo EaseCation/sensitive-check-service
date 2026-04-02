@@ -41,7 +41,7 @@ const app = new Elysia()
     success: true,
     message: "ok",
     data: {
-      timestamp: new Date().toISOString(),
+      timestamp: Math.floor(Date.now() / 1000),
       g79: g79Store.getStatus(),
     },
   }))
@@ -193,11 +193,11 @@ function resolveBooleanFlag(...values: unknown[]) {
 
 function buildHitRuleIds(result: ReturnType<G79RuleStore["checkText"]>) {
   if (result.hits && result.hits.length > 0) {
-    return [...new Set(result.hits.map((hit) => `${hit.rule}-${hit.id}`))];
+    return [...new Set(result.hits.map((hit) => hit.displayId))];
   }
 
   if (result.firstHit) {
-    return [`${result.firstHit.rule}-${result.firstHit.id}`];
+    return [result.firstHit.displayId];
   }
 
   return [] as string[];

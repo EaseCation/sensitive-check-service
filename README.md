@@ -1,6 +1,25 @@
 # Sensitive Check Service
 
-基于 `Bun + Elysia` 的网易敏感词检测服务。
+基于 `Bun + Elysia` 的敏感词检测服务，规则数据来自网易。
+
+## 方案优点
+
+- 启动快：优先读取本地缓存，没有缓存才拉远程规则
+- 刷新稳：新规则会先完整拉取、解密、预编译，成功后再原子切换
+- 抗竞态：检测请求会固定使用单次请求开始时拿到的规则快照，不会半路切换
+- 有兜底：刷新后上一版规则会在内存保留 3 分钟，异常时可平滑回退
+- 不中断：如果规则刷新失败，服务继续使用当前可用快照，不影响在线检测
+- 易观测：`/health` 会返回当前快照、上一版快照和刷新状态
+
+## 规则刷新流程
+
+1. 服务启动时先尝试读取本地缓存规则
+2. 如果存在缓存，先加载并预编译，再后台异步刷新最新规则
+3. 如果没有缓存，则启动时同步拉取最新规则
+4. 规则拉取后会经过解密、解析、预编译
+5. 只有整套规则准备完成后，才一次性切换为新快照
+6. 切换后上一版快照会额外保留 3 分钟
+7. 服务启动后每 30 分钟自动刷新一次规则
 
 ## 快速开始
 
@@ -28,13 +47,13 @@ bun run build
 bun run start
 ```
 
-Docker 二进制构建：
+Docker 用 Linux 二进制构建：
 
 ```bash
 bun run build:docker
 ```
 
-Docker 启动：
+使用 Docker Compose 启动：
 
 ```bash
 docker compose up --build
@@ -50,9 +69,9 @@ http://localhost:3000
 
 - `HOST`：监听地址，默认 `0.0.0.0`
 - `PORT`：监听端口，默认 `3000`
-- `RULE_CACHE_PATH`：规则缓存文件路径，默认 `./.cache`
+- `RULE_CACHE_PATH`：规则缓存文件路径，默认 `./.cache/g79-rules.json`
 
 ## 文档
 
-- API 文档：[docs/api.md](./docs/api.md)
-- 部署文档：[docs/deploy.md](./docs/deploy.md)
+- [API 文档](./docs/api.md)
+- [部署文档](./docs/deploy.md)
