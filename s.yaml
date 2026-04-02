@@ -14,8 +14,10 @@ resources:
       functionName: senstive-check-service
       runtime: custom-container
       code: ./
+      cpu: 0.5
       memorySize: 512
       timeout: 60
+      instanceConcurrency: 10
       customContainerConfig:
         image: ${vars.image}
         port: 3000
