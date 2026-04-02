@@ -3,6 +3,7 @@ import { G79RuleStore, type G79CheckMode } from "./rules/g79-store";
 
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST ?? "0.0.0.0";
+const isDevelopment = process.env.NODE_ENV === "development";
 
 const g79Store = new G79RuleStore({
   cachePath: process.env.RULE_CACHE_PATH,
@@ -102,7 +103,7 @@ const app = new Elysia()
         ...(includeDetails
           ? {
               details: {
-                hits: result.hits ?? [],
+                hits: buildResponseHits(result.hits ?? []),
               },
             }
           : {}),
@@ -201,4 +202,12 @@ function buildHitRuleIds(result: ReturnType<G79RuleStore["checkText"]>) {
   }
 
   return [] as string[];
+}
+
+function buildResponseHits(hits: NonNullable<ReturnType<G79RuleStore["checkText"]>["hits"]>) {
+  if (isDevelopment) {
+    return hits;
+  }
+
+  return hits.map(({ pattern, ...hit }) => hit);
 }

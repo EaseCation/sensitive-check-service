@@ -239,7 +239,7 @@ Content-Type: application/json
 明细字段补充：
 
 - `details.hits[].displayId`：命中规则完整 ID，格式同 `hitRuleIds`
-- `details.hits[].pattern`：原始规则表达式
+- `details.hits[].pattern`：原始规则表达式，仅在 `NODE_ENV=development` 时返回
 - `details.hits[].violations`：该条规则命中的违规词
 - `details.hits[].ranges`：命中片段的位置区间
 - `details.hits[].replacedText`：仅基于这一条规则替换后的文本
