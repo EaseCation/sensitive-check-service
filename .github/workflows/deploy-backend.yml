@@ -1,0 +1,130 @@
+name: Build Image and Deploy to Aliyun FC
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/deploy-backend.yml
+      - Dockerfile.release
+      - bun.lock
+      - package.json
+      - tsconfig.json
+      - s.yaml
+      - src/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ACR_REGISTRY: ${{ vars.ACR_REGISTRY }}
+  ACR_NAMESPACE: ${{ vars.ACR_NAMESPACE }}
+  ACR_REPOSITORY: ${{ vars.ACR_REPOSITORY }}
+  ALIYUN_REGION: ${{ vars.ALIYUN_REGION }}
+  FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate settings
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -n "${ACR_REGISTRY}" || { echo "Missing repo variable: ACR_REGISTRY"; exit 1; }
+          test -n "${ACR_NAMESPACE}" || { echo "Missing repo variable: ACR_NAMESPACE"; exit 1; }
+          test -n "${ACR_REPOSITORY}" || { echo "Missing repo variable: ACR_REPOSITORY"; exit 1; }
+          test -n "${{ secrets.ACR_USERNAME }}" || { echo "Missing secret: ACR_USERNAME"; exit 1; }
+          test -n "${{ secrets.ACR_PASSWORD }}" || { echo "Missing secret: ACR_PASSWORD"; exit 1; }
+          test -n "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" || { echo "Missing secret: ALIYUN_ACCESS_KEY_ID"; exit 1; }
+          test -n "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}" || { echo "Missing secret: ALIYUN_ACCESS_KEY_SECRET"; exit 1; }
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build Linux binary
+        run: bun run build:docker
+
+      - name: Prepare image info
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IMAGE_TAG="${GITHUB_SHA}"
+          IMAGE_URI="${ACR_REGISTRY}/${ACR_NAMESPACE}/${ACR_REPOSITORY}:${IMAGE_TAG}"
+
+          echo "tag=${IMAGE_TAG}" >> "${GITHUB_OUTPUT}"
+          echo "uri=${IMAGE_URI}" >> "${GITHUB_OUTPUT}"
+          echo "FC_IMAGE=${IMAGE_URI}" >> "${GITHUB_ENV}"
+
+          if [ -z "${ALIYUN_REGION}" ]; then
+            echo "ALIYUN_REGION=cn-hangzhou" >> "${GITHUB_ENV}"
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.ACR_REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.release
+          push: true
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: |
+            ${{ steps.image.outputs.uri }}
+            ${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/${{ env.ACR_REPOSITORY }}:latest
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Serverless Devs
+        run: npm install -g @serverless-devs/s
+
+      - name: Configure Aliyun credentials
+        shell: bash
+        run: |
+          s config add \
+            --AccessKeyID "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" \
+            --AccessKeySecret "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}" \
+            -a default
+
+      - name: Deploy to Function Compute
+        run: s deploy -y
+
+      - name: Notify Feishu on success
+        if: success() && env.FEISHU_WEBHOOK != ''
+        shell: bash
+        run: |
+          curl -X POST "${FEISHU_WEBHOOK}" \
+            -H "Content-Type: application/json" \
+            -d "{\"msg_type\":\"text\",\"content\":{\"text\":\"[senstive-check-service] Deploy succeeded\nRepo: ${{ github.repository }}\nRef: ${{ github.ref_name }}\nImage: ${{ steps.image.outputs.uri }}\nActor: ${{ github.actor }}\"}}"
+
+      - name: Notify Feishu on failure
+        if: failure() && env.FEISHU_WEBHOOK != ''
+        shell: bash
+        run: |
+          curl -X POST "${FEISHU_WEBHOOK}" \
+            -H "Content-Type: application/json" \
+            -d "{\"msg_type\":\"text\",\"content\":{\"text\":\"[senstive-check-service] Deploy failed\nRepo: ${{ github.repository }}\nRef: ${{ github.ref_name }}\nImage: ${{ steps.image.outputs.uri }}\nActor: ${{ github.actor }}\"}}"

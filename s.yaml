@@ -1,0 +1,40 @@
+edition: 3.0.0
+name: senstive-check-service-app
+access: default
+
+vars:
+  region: ${env('ALIYUN_REGION', 'cn-hangzhou')}
+  image: ${env('FC_IMAGE')}
+
+resources:
+  senstive-check-service:
+    component: fc3
+    props:
+      region: ${vars.region}
+      functionName: senstive-check-service
+      runtime: custom-container
+      code: ./
+      memorySize: 512
+      timeout: 60
+      customContainerConfig:
+        image: ${vars.image}
+        port: 3000
+      environmentVariables:
+        HOST: 0.0.0.0
+        PORT: "3000"
+        NODE_ENV: production
+      triggers:
+        - triggerName: httpTrigger
+          triggerType: http
+          qualifier: LATEST
+          triggerConfig:
+            authType: anonymous
+            disableURLInternet: false
+            methods:
+              - GET
+              - POST
+              - PUT
+              - PATCH
+              - DELETE
+              - OPTIONS
+              - HEAD
