@@ -93,6 +93,7 @@ jobs:
           file: ./Dockerfile.release
           push: true
           platforms: linux/amd64
+          provenance: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: |
