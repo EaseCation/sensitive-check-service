@@ -3,7 +3,7 @@ import { G79RuleStore, type G79CheckMode } from "./rules/g79-store";
 
 const port = Number(process.env.PORT ?? 3000);
 const host = process.env.HOST ?? "0.0.0.0";
-const isDevelopment = process.env.NODE_ENV === "development";
+const isDevelopment = Reflect.get(process.env, "NODE_ENV") === "development";
 
 const g79Store = new G79RuleStore({
   cachePath: process.env.RULE_CACHE_PATH,
