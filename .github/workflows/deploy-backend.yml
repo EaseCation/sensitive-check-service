@@ -34,16 +34,21 @@ jobs:
 
       - name: Validate settings
         shell: bash
+        env:
+          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+          ALIYUN_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          ALIYUN_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
         run: |
           set -euo pipefail
 
           test -n "${ACR_REGISTRY}" || { echo "Missing repo variable: ACR_REGISTRY"; exit 1; }
           test -n "${ACR_NAMESPACE}" || { echo "Missing repo variable: ACR_NAMESPACE"; exit 1; }
           test -n "${ACR_REPOSITORY}" || { echo "Missing repo variable: ACR_REPOSITORY"; exit 1; }
-          test -n "${{ secrets.ACR_USERNAME }}" || { echo "Missing secret: ACR_USERNAME"; exit 1; }
-          test -n "${{ secrets.ACR_PASSWORD }}" || { echo "Missing secret: ACR_PASSWORD"; exit 1; }
-          test -n "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" || { echo "Missing secret: ALIYUN_ACCESS_KEY_ID"; exit 1; }
-          test -n "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}" || { echo "Missing secret: ALIYUN_ACCESS_KEY_SECRET"; exit 1; }
+          test -n "${ACR_USERNAME}" || { echo "Missing secret: ACR_USERNAME"; exit 1; }
+          test -n "${ACR_PASSWORD}" || { echo "Missing secret: ACR_PASSWORD"; exit 1; }
+          test -n "${ALIYUN_ACCESS_KEY_ID}" || { echo "Missing secret: ALIYUN_ACCESS_KEY_ID"; exit 1; }
+          test -n "${ALIYUN_ACCESS_KEY_SECRET}" || { echo "Missing secret: ALIYUN_ACCESS_KEY_SECRET"; exit 1; }
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -104,10 +109,13 @@ jobs:
 
       - name: Configure Aliyun credentials
         shell: bash
+        env:
+          ALIYUN_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          ALIYUN_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
         run: |
           s config add \
-            --AccessKeyID "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" \
-            --AccessKeySecret "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}" \
+            --AccessKeyID "${ALIYUN_ACCESS_KEY_ID}" \
+            --AccessKeySecret "${ALIYUN_ACCESS_KEY_SECRET}" \
             -a default
 
       - name: Deploy to Function Compute
