@@ -19,6 +19,7 @@ type CheckRequestBody = {
   mode?: unknown;
   includeDetails?: unknown;
   details?: unknown;
+  preserveFormatting?: unknown;
 };
 
 const app = new Elysia()
@@ -53,6 +54,7 @@ const app = new Elysia()
     const requestedRules = extractRequestedRules(payload);
     const mode = resolveCheckMode(payload.mode);
     const includeDetails = resolveBooleanFlag(payload.includeDetails, payload.details);
+    const preserveFormatting = resolveBooleanFlag(payload.preserveFormatting);
 
     if (text === null) {
       set.status = 400;
@@ -78,7 +80,11 @@ const app = new Elysia()
       };
     }
 
-    const result = g79Store.checkText(text, requestedRules, { mode });
+    const checkOptions = {
+      mode,
+      preserveFormatting,
+    };
+    const result = g79Store.checkText(text, requestedRules, checkOptions);
 
     if (result.resolvedRules.length === 0) {
       set.status = 400;

@@ -76,6 +76,12 @@ type MatchRange = {
   end: number;
 };
 
+type TextProjection = {
+  rawText: string;
+  checkedText: string;
+  hasMinecraftFormatting: boolean;
+};
+
 export type G79RuleHit = {
   rule: string;
   id: string;
@@ -155,7 +161,7 @@ export class G79RuleStore {
   checkText(
     text: string,
     requestedRules: string[],
-    options?: { mode?: G79CheckMode },
+    options?: { mode?: G79CheckMode; preserveFormatting?: boolean },
   ) {
     const runtimeSnapshot = this.getReadableSnapshot();
 
@@ -167,6 +173,12 @@ export class G79RuleStore {
     const resolved = this.resolveRuleNames(runtimeSnapshot, requested);
     const mode = options?.mode ?? "all";
     const stopAtFirstHit = mode === "first";
+    const preserveFormatting = options?.preserveFormatting ?? false;
+    const projection = preserveFormatting ? projectTextForCheck(text) : {
+      rawText: text,
+      checkedText: text,
+      hasMinecraftFormatting: false,
+    };
     const hits: G79RuleHit[] = [];
     const allRanges: MatchRange[] = [];
     const violationWords: string[] = [];
@@ -185,7 +197,7 @@ export class G79RuleStore {
         }
 
         checkedPatternCount += 1;
-        const ranges = collectMatchRanges(entry.regex, text);
+        const ranges = collectMatchRanges(entry.regex, projection.checkedText);
 
         if (ranges.length === 0) {
           continue;
@@ -198,7 +210,7 @@ export class G79RuleStore {
           pattern: entry.source,
           violations: uniqueValues(ranges.map((range) => range.value)),
           ranges,
-          replacedText: maskText(text, ranges),
+          replacedText: maskProjectedText(projection, ranges),
         } satisfies G79RuleHit;
 
         hits.push(hit);
@@ -225,7 +237,7 @@ export class G79RuleStore {
       }
     }
 
-    const replacedText = allRanges.length > 0 ? maskText(text, allRanges) : text;
+    const replacedText = allRanges.length > 0 ? maskProjectedText(projection, allRanges) : text;
     const firstHit = hits[0] ?? null;
 
     return {
@@ -667,6 +679,71 @@ function collectMatchRanges(regex: RegExp, text: string) {
   }
 
   return ranges;
+}
+
+function projectTextForCheck(text: string): TextProjection {
+  let checkedText = "";
+  let hasMinecraftFormatting = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const current = text[index];
+
+    if (current === "§" && index + 1 < text.length) {
+      hasMinecraftFormatting = true;
+      index += 1;
+      continue;
+    }
+
+    checkedText += current;
+  }
+
+  return {
+    rawText: text,
+    checkedText,
+    hasMinecraftFormatting,
+  };
+}
+
+function maskProjectedText(projection: TextProjection, ranges: MatchRange[]) {
+  if (!projection.hasMinecraftFormatting) {
+    return maskText(projection.rawText, ranges);
+  }
+
+  const mergedRanges = mergeRanges(ranges);
+
+  if (mergedRanges.length === 0) {
+    return projection.rawText;
+  }
+
+  let result = "";
+  let visibleIndex = 0;
+  let rangeIndex = 0;
+
+  for (let rawIndex = 0; rawIndex < projection.rawText.length; rawIndex += 1) {
+    const current = projection.rawText[rawIndex];
+
+    if (current === "§" && rawIndex + 1 < projection.rawText.length) {
+      result += current;
+      result += projection.rawText[rawIndex + 1];
+      rawIndex += 1;
+      continue;
+    }
+
+    while (rangeIndex < mergedRanges.length && visibleIndex >= mergedRanges[rangeIndex].end) {
+      rangeIndex += 1;
+    }
+
+    const currentRange = mergedRanges[rangeIndex];
+    const inRange =
+      currentRange !== undefined &&
+      visibleIndex >= currentRange.start &&
+      visibleIndex < currentRange.end;
+
+    result += inRange ? "*" : current;
+    visibleIndex += 1;
+  }
+
+  return result;
 }
 
 function maskText(text: string, ranges: MatchRange[]) {

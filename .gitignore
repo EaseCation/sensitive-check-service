@@ -44,4 +44,4 @@ yarn-error.log*
 /.cache
 package-lock.json
 **/*.bun
-.dist
+dist

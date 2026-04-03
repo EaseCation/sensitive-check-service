@@ -152,6 +152,7 @@ Content-Type: application/json
   "text": "fuck and shit",
   "rule": "intercept",
   "mode": "all",
+  "preserveFormatting": false,
   "includeDetails": false
 }
 ```
@@ -165,6 +166,7 @@ Content-Type: application/json
 - `mode`：匹配模式，可选
   - `all`：遍历指定规则组内全部规则，默认值
   - `first`：命中第一条规则后立即停止
+- `preserveFormatting`：是否在匹配时忽略 Minecraft 格式符（如 `§c`、`§l`），并在 `replacedText` 中保留原有格式，默认 `false`
 - `includeDetails`：是否返回详细命中信息，默认 `false`
 - `details`：`includeDetails` 的兼容别名，可选
 
@@ -172,6 +174,7 @@ Content-Type: application/json
 
 - `rule`、`rules`、`ruleNames` 三者任选其一即可
 - 当规则中包含 `all` 时，会自动展开为当前全部规则组
+- 当 `preserveFormatting: true` 时，服务会先剥离文本中的 Minecraft 格式符后再做匹配，再把命中的可见字符映射回原文本并替换为 `*`
 - 默认只返回精简结果
 - 只有显式传入 `includeDetails: true` 时，才会返回 `data.details`
 
@@ -195,7 +198,7 @@ Content-Type: application/json
 
 - `pass`：`true` 表示通过；`false` 表示检测到违规内容
 - `violationWords`：命中的违规词文本，已去重
-- `replacedText`：将命中内容替换为 `*` 后的文本；未命中时为空字符串
+- `replacedText`：将命中内容替换为 `*` 后的文本；未命中时为空字符串；当 `preserveFormatting: true` 且输入包含 Minecraft 格式符时，仅替换可见命中文字，原格式符会保留
 - `hitRuleIds`：命中规则完整 ID，格式为 `{ruleGroup}-{ruleId}`，例如 `intercept-12`
 - `usedTimeMs`：本次检测耗时，单位毫秒
 
@@ -241,7 +244,7 @@ Content-Type: application/json
 - `details.hits[].displayId`：命中规则完整 ID，格式同 `hitRuleIds`
 - `details.hits[].pattern`：原始规则表达式，仅在 `NODE_ENV=development` 时返回
 - `details.hits[].violations`：该条规则命中的违规词
-- `details.hits[].ranges`：命中片段的位置区间
+- `details.hits[].ranges`：命中片段的位置区间；当 `preserveFormatting: true` 时，区间基于剥离格式符后的可见文本
 - `details.hits[].replacedText`：仅基于这一条规则替换后的文本
 
 ## 错误响应示例
@@ -313,4 +316,12 @@ curl -X POST http://localhost:3000/check \
 curl -X POST http://localhost:3000/check \
   -H "Content-Type: application/json" \
   -d "{\"text\":\"fuck and shit\",\"rule\":\"intercept\",\"mode\":\"all\",\"includeDetails\":true}"
+```
+
+保留 Minecraft 颜色/格式符并按可见文本匹配：
+
+```bash
+curl -X POST http://localhost:3000/check \
+  -H "Content-Type: application/json" \
+  -d "{\"text\":\"§l§6E§aC§7明天§c倒§4闭§r§f\",\"rule\":\"nickname\",\"mode\":\"all\",\"preserveFormatting\":true}"
 ```
