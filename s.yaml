@@ -1,5 +1,5 @@
 edition: 3.0.0
-name: senstive-check-service-app
+name: sensitive-check-service-app
 access: default
 
 vars:
@@ -7,11 +7,11 @@ vars:
   image: ${env('FC_IMAGE')}
 
 resources:
-  senstive-check-service:
+  sensitive-check-service:
     component: fc3
     props:
       region: ${vars.region}
-      functionName: senstive-check-service
+      functionName: sensitive-check-service
       runtime: custom-container
       code: ./
       cpu: 0.5

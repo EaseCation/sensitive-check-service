@@ -74,31 +74,31 @@ docker compose down
 构建镜像：
 
 ```bash
-docker build -t senstive-check-service:latest .
+docker build -t sensitive-check-service:latest .
 ```
 
 运行容器：
 
 ```bash
 docker run -d \
-  --name senstive-check-service \
+  --name sensitive-check-service \
   -p 3000:3000 \
   -e HOST=0.0.0.0 \
   -e PORT=3000 \
   -e NODE_ENV=production \
-  senstive-check-service:latest
+  sensitive-check-service:latest
 ```
 
 查看日志：
 
 ```bash
-docker logs -f senstive-check-service
+docker logs -f sensitive-check-service
 ```
 
 重启：
 
 ```bash
-docker restart senstive-check-service
+docker restart sensitive-check-service
 ```
 
 ## 云端容器平台
@@ -131,14 +131,14 @@ docker restart senstive-check-service
 示例：
 
 ```bash
-docker tag senstive-check-service:latest registry.example.com/senstive-check-service:latest
-docker push registry.example.com/senstive-check-service:latest
+docker tag sensitive-check-service:latest registry.example.com/sensitive-check-service:latest
+docker push registry.example.com/sensitive-check-service:latest
 ```
 
 部署时使用镜像地址：
 
 ```text
-registry.example.com/senstive-check-service:latest
+registry.example.com/sensitive-check-service:latest
 ```
 
 ## GitHub Actions 所需配置

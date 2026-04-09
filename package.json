@@ -1,5 +1,5 @@
 {
-  "name": "senstive-check-service",
+  "name": "sensitive-check-service",
   "private": true,
   "scripts": {
     "dev": "bun run --watch src/index.ts",

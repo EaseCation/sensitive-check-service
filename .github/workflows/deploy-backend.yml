@@ -128,7 +128,7 @@ jobs:
         run: |
           curl -X POST "${FEISHU_WEBHOOK}" \
             -H "Content-Type: application/json" \
-            -d "{\"msg_type\":\"text\",\"content\":{\"text\":\"[senstive-check-service] Deploy succeeded\nRepo: ${{ github.repository }}\nRef: ${{ github.ref_name }}\nImage: ${{ steps.image.outputs.uri }}\nActor: ${{ github.actor }}\"}}"
+            -d "{\"msg_type\":\"text\",\"content\":{\"text\":\"[sensitive-check-service] Deploy succeeded\nRepo: ${{ github.repository }}\nRef: ${{ github.ref_name }}\nImage: ${{ steps.image.outputs.uri }}\nActor: ${{ github.actor }}\"}}"
 
       - name: Notify Feishu on failure
         if: failure() && env.FEISHU_WEBHOOK != ''
@@ -136,4 +136,4 @@ jobs:
         run: |
           curl -X POST "${FEISHU_WEBHOOK}" \
             -H "Content-Type: application/json" \
-            -d "{\"msg_type\":\"text\",\"content\":{\"text\":\"[senstive-check-service] Deploy failed\nRepo: ${{ github.repository }}\nRef: ${{ github.ref_name }}\nImage: ${{ steps.image.outputs.uri }}\nActor: ${{ github.actor }}\"}}"
+            -d "{\"msg_type\":\"text\",\"content\":{\"text\":\"[sensitive-check-service] Deploy failed\nRepo: ${{ github.repository }}\nRef: ${{ github.ref_name }}\nImage: ${{ steps.image.outputs.uri }}\nActor: ${{ github.actor }}\"}}"
