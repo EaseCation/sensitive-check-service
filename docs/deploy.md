@@ -149,13 +149,13 @@ registry.example.com/sensitive-check-service:latest
 - `ACR_NAMESPACE`
 - `ACR_REPOSITORY`
 - `ALIYUN_REGION`，可选，默认 `cn-hangzhou`
+- `ALIYUN_OIDC_PROVIDER_ARN`
+- `ALIYUN_FC_DEPLOY_ROLE_ARN`
 
 仓库密钥：
 
 - `ACR_USERNAME`
 - `ACR_PASSWORD`
-- `ALIYUN_ACCESS_KEY_ID`
-- `ALIYUN_ACCESS_KEY_SECRET`
 - `FEISHU_WEBHOOK`，可选
 
 ## 上线后自检
