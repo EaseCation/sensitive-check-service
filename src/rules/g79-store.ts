@@ -535,13 +535,16 @@ async function requestDownloadUrl(endpointGameId: string, payloadGameId: string)
     throw new Error(`Init request failed with status ${response.status}.`);
   }
 
-  const data = (await response.json()) as { url?: unknown };
+  const data = (await response.json()) as { url_one?: unknown; url?: unknown };
+  const downloadUrl = (typeof data.url_one === "string" && data.url_one.length > 0)
+    ? data.url_one
+    : data.url;
 
-  if (typeof data.url !== "string" || data.url.length === 0) {
+  if (typeof downloadUrl !== "string" || downloadUrl.length === 0) {
     throw new Error("Init response did not contain a usable url.");
   }
 
-  return data.url;
+  return downloadUrl;
 }
 
 async function fetchAndDecryptG79Rules(sourceUrl: string) {
