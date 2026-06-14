@@ -591,6 +591,12 @@ function rc4(data: Uint8Array, key: Uint8Array) {
   return output;
 }
 
+function isChineseUnicode(codePoint: number): boolean {
+  // CJK Unified Ideographs Extension A: U+3400 - U+4DBF
+  // CJK Unified Ideographs: U+4E00 - U+9FFF
+  return codePoint >= 0x3400 && codePoint <= 0x9fff;
+}
+
 function decodePcreUnicodeInObject(value: unknown): any {
   if (Array.isArray(value)) {
     return value.map((item) => decodePcreUnicodeInObject(item));
@@ -606,9 +612,14 @@ function decodePcreUnicodeInObject(value: unknown): any {
   }
 
   if (typeof value === "string") {
-    return value.replace(/\\x\{([0-9a-fA-F]+)\}/g, (_, hex) =>
-      String.fromCodePoint(Number.parseInt(hex, 16)),
-    );
+    return value.replace(/\\x\{([0-9a-fA-F]+)\}/g, (_, hex) => {
+      let codePoint = Number.parseInt(hex, 16);
+      // 中文 Unicode 需要 -1
+      if (isChineseUnicode(codePoint)) {
+        codePoint -= 1;
+      }
+      return String.fromCodePoint(codePoint);
+    });
   }
 
   return value;
